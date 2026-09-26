@@ -176,7 +176,15 @@ impl IBusEngineService {
             action, self.buffer.raw, self.buffer.composed, self.caps
         ));
         match action {
-            TelexAction::PassThrough(_) => false,
+            TelexAction::PassThrough(c) => {
+                if c == '\0' {
+                    false
+                } else {
+                    let text_val = make_ibus_text(&c.to_string());
+                    let _ = Self::commit_text(&emitter, text_val).await;
+                    true
+                }
+            }
             TelexAction::Replace {
                 backspaces,
                 new_text,
