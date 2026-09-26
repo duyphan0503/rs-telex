@@ -47,7 +47,7 @@ impl IBusClient {
     }
 
     /// Run the IBus engine daemon service
-    pub async fn run_service(self, register: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn run_service(self, _register: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.connection.request_name(COMPONENT_NAME).await?;
         super::log::log_info(&format!(
             "IBusClient connected, requested bus name '{}'",
@@ -60,7 +60,7 @@ impl IBusClient {
             .await?;
         super::log::log_info(&format!("Exported IBusFactory at {}", IBUS_FACTORY_PATH));
 
-        if register && let Err(e) = self.register_component().await {
+        if let Err(e) = self.register_component().await {
             super::log::log_info(&format!("Notice: Component registration reported: {}", e));
         }
 

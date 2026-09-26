@@ -12,23 +12,24 @@ fn print_component_xml() {
 <component>
   <name>org.freedesktop.IBus.rs-telex</name>
   <description>Vietnamese Telex Input Method (Rust)</description>
-  <exec>/usr/bin/rs-telex --ibus</exec>
+  <exec>/usr/libexec/ibus-engine-rs-telex --ibus</exec>
   <version>0.1.0</version>
-  <author>dp</author>
+  <author>duyphan0503</author>
   <license>MIT</license>
-  <homepage>https://github.com/dp/rs-telex</homepage>
+  <homepage>https://github.com/duyphan0503/rs-telex</homepage>
   <textdomain>rs-telex</textdomain>
   <engines>
     <engine>
       <name>rs-telex</name>
       <language>vi</language>
       <license>MIT</license>
-      <author>dp</author>
+      <author>duyphan0503</author>
       <icon>ibus-rs-telex</icon>
       <layout>us</layout>
-      <longname>Vietnamese - Telex (rs-telex)</longname>
+      <longname>Telex</longname>
       <description>Vietnamese Telex input method written in Rust</description>
       <rank>99</rank>
+      <symbol>vi</symbol>
     </engine>
   </engines>
 </component>"#;

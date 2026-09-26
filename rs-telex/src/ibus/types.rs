@@ -121,7 +121,7 @@ pub fn make_component() -> Value<'static> {
         "MIT".to_string(),
         "duyphan0503".to_string(),
         "https://github.com/duyphan0503/rs-telex".to_string(),
-        "/usr/bin/rs-telex --ibus".to_string(),
+        "/usr/libexec/ibus-engine-rs-telex --ibus".to_string(),
         "rs-telex".to_string(),
         Vec::<Value<'static>>::new(),
         vec![engine],
