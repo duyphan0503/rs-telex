@@ -1,5 +1,5 @@
 use crate::ibus::types::*;
-use crate::telex::TelexBuffer;
+use crate::telex::{TelexAction, TelexBuffer};
 use zbus::object_server::SignalEmitter;
 use zbus::{Result, interface};
 
@@ -26,6 +26,7 @@ pub struct IBusEngineService {
     pub caps: u32,
     pub enabled: bool,
     pub temporary_english: bool,
+    pub undo_history: Option<(usize, String, String)>,
 }
 
 impl Default for IBusEngineService {
@@ -41,17 +42,7 @@ impl IBusEngineService {
             caps: 0,
             enabled: true,
             temporary_english: false,
-        }
-    }
-
-    /// Commit whatever is in the current buffer cleanly to the document and hide the preedit layer
-    async fn commit_current_buffer(&mut self, emitter: &SignalEmitter<'_>) {
-        if !self.buffer.is_empty() {
-            let composed = self.buffer.composed.clone();
-            let text_val = make_ibus_text(&composed);
-            let _ = Self::commit_text(emitter, text_val).await;
-            let _ = Self::hide_preedit_text(emitter).await;
-            self.buffer.reset();
+            undo_history: None,
         }
     }
 }
@@ -60,10 +51,9 @@ impl IBusEngineService {
 impl IBusEngineService {
     /// Process incoming key events from the IBus daemon.
     ///
-    /// Zero-Underline In-Place Direct Rendering:
-    /// - Renders in-place with plain text attributes (no underline, no popup box).
-    /// - 100% identical look-and-feel to Unikey direct typing.
-    /// - Instantaneous, flicker-free character replacement with zero race conditions.
+    /// Direct in-place typing (Forward-Key):
+    /// - Normal characters appear on screen IMMEDIATELY (PassThrough -> return false).
+    /// - Character transformations delete old characters and commit new text in-place.
     async fn process_key_event(
         &mut self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -99,19 +89,18 @@ impl IBusEngineService {
             || (has_shift && (keyval == IBUS_KEY_CONTROL_L || keyval == IBUS_KEY_CONTROL_R))
             || (has_alt && (keyval == 'z' as u32 || keyval == 'Z' as u32))
         {
-            self.commit_current_buffer(&emitter).await;
             self.enabled = !self.enabled;
+            self.buffer.reset();
             super::log::log_info(&format!("Mode toggled: enabled={}", self.enabled));
             return false;
         }
 
-        // 5. Escape key: cancel current composing word and reset
+        // 5. Escape key: temporary English mode or buffer reset
         if keyval == IBUS_KEY_ESCAPE {
             if !self.buffer.is_empty() {
-                let _ = Self::hide_preedit_text(&emitter).await;
                 self.buffer.reset();
                 self.temporary_english = false;
-                return true;
+                return false;
             }
             self.temporary_english = !self.temporary_english;
             return false;
@@ -119,73 +108,71 @@ impl IBusEngineService {
 
         // 6. If disabled (EN mode) or temporary English, pass-through ALL keys immediately
         if !self.enabled || self.temporary_english {
-            self.commit_current_buffer(&emitter).await;
+            if !self.buffer.is_empty() {
+                self.buffer.reset();
+            }
             return false;
         }
 
         // 7. System shortcuts (Ctrl+C, Ctrl+V, Alt+Tab, etc.)
         if has_ctrl || has_alt || has_super {
-            self.commit_current_buffer(&emitter).await;
+            // Ctrl+Z word undo
+            if has_ctrl
+                && (keyval == 'z' as u32 || keyval == 'Z' as u32)
+                && let Some((backspaces, raw, _)) = self.undo_history.take()
+            {
+                let supports_surrounding = (self.caps & IBUS_CAP_SURROUNDING_TEXT) != 0;
+                if supports_surrounding {
+                    let offset = -(backspaces as i32);
+                    let _ =
+                        Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
+                } else {
+                    for _ in 0..backspaces {
+                        let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
+                        let _ = Self::forward_key_event(
+                            &emitter,
+                            IBUS_KEY_BACKSPACE,
+                            22,
+                            IBUS_RELEASE_MASK,
+                        )
+                        .await;
+                    }
+                }
+                let text_val = make_ibus_text(&raw);
+                let _ = Self::commit_text(&emitter, text_val).await;
+                self.buffer.reset();
+                return true;
+            }
+            self.buffer.reset();
             return false;
         }
 
         // 8. Word delimiters and navigation keys
-        if keyval == IBUS_KEY_SPACE {
-            if !self.buffer.is_empty() {
-                let mut text = self.buffer.composed.clone();
-                text.push(' ');
-                let text_val = make_ibus_text(&text);
-                let _ = Self::commit_text(&emitter, text_val).await;
-                let _ = Self::hide_preedit_text(&emitter).await;
+        match keyval {
+            IBUS_KEY_BACKSPACE => {
+                if !self.buffer.is_empty() {
+                    self.buffer.pop_char();
+                }
+                return false;
+            }
+            IBUS_KEY_SPACE
+            | IBUS_KEY_RETURN
+            | IBUS_KEY_TAB
+            | IBUS_KEY_LEFT
+            | IBUS_KEY_RIGHT
+            | IBUS_KEY_UP
+            | IBUS_KEY_DOWN
+            | IBUS_KEY_DELETE
+            | 0xff50..=0xff6b // Home, End, PageUp, PageDown, Insert
+            | 0xffbe..=0xffcb => { // F1..F12
                 self.buffer.reset();
                 self.temporary_english = false;
-                return true;
+                return false;
             }
-            return false;
+            _ => {}
         }
 
-        if keyval == IBUS_KEY_RETURN || keyval == IBUS_KEY_TAB {
-            if !self.buffer.is_empty() {
-                self.commit_current_buffer(&emitter).await;
-                self.temporary_english = false;
-                return false; // let Return/Tab execute in target application
-            }
-            return false;
-        }
-
-        if keyval == IBUS_KEY_BACKSPACE {
-            if !self.buffer.is_empty() {
-                self.buffer.pop_char();
-                if self.buffer.is_empty() {
-                    let _ = Self::hide_preedit_text(&emitter).await;
-                } else {
-                    let composed = self.buffer.composed.clone();
-                    let cursor_pos = composed.chars().count() as u32;
-                    // Zero-underline plain text
-                    let text_val = make_ibus_text(&composed);
-                    let _ = Self::update_preedit_text(&emitter, text_val, cursor_pos, true).await;
-                }
-                return true;
-            }
-            return false;
-        }
-
-        if matches!(
-            keyval,
-            IBUS_KEY_LEFT
-                | IBUS_KEY_RIGHT
-                | IBUS_KEY_UP
-                | IBUS_KEY_DOWN
-                | IBUS_KEY_DELETE
-                | 0xff50..=0xff6b // Home, End, PageUp, PageDown, Insert
-                | 0xffbe..=0xffcb // F1..F12
-        ) {
-            self.commit_current_buffer(&emitter).await;
-            self.temporary_english = false;
-            return false;
-        }
-
-        // 9. Extract valid character
+        // 9. Extract printable character
         let ch = if (0x20..=0x7e).contains(&keyval) {
             char::from_u32(keyval)
         } else if (0x01000000..=0x0110ffff).contains(&keyval) {
@@ -197,39 +184,68 @@ impl IBusEngineService {
         let ch = match ch {
             Some(c) if !c.is_control() => c,
             _ => {
-                self.commit_current_buffer(&emitter).await;
+                self.buffer.reset();
                 return false;
             }
         };
 
         // 10. Non-alphabetic characters (punctuation, symbols, digits)
-        // Auto-commit current word and append the symbol/digit immediately
         if !ch.is_alphabetic() {
-            if !self.buffer.is_empty() {
-                let mut text = self.buffer.composed.clone();
-                text.push(ch);
-                let text_val = make_ibus_text(&text);
-                let _ = Self::commit_text(&emitter, text_val).await;
-                let _ = Self::hide_preedit_text(&emitter).await;
-                self.buffer.reset();
-                return true;
-            }
+            self.buffer.reset();
             return false;
         }
 
-        // 11. Vietnamese Telex processing via Zero-Underline In-Place rendering
-        let _ = self.buffer.process_char(ch);
-        let composed = self.buffer.composed.clone();
-        let cursor_pos = composed.chars().count() as u32;
-        // make_ibus_text has NO underline attribute — displays as natural plain text
-        let text_val = make_ibus_text(&composed);
-        let _ = Self::update_preedit_text(&emitter, text_val, cursor_pos, true).await;
-        let _ = Self::show_preedit_text(&emitter).await;
+        // 11. Process character with TelexBuffer
+        let raw_char = ch;
+        let action = self.buffer.process_char(ch);
         super::log::log_info(&format!(
-            "In-place rendered: raw='{}', composed='{}'",
-            self.buffer.raw, self.buffer.composed
+            "Telex action: {:?}, raw='{}', composed='{}'",
+            action, self.buffer.raw, self.buffer.composed
         ));
-        true
+
+        match action {
+            TelexAction::PassThrough(_) => {
+                // Character appears on screen IMMEDIATELY via native key event
+                false
+            }
+            TelexAction::Replace {
+                backspaces,
+                new_text,
+            } => {
+                super::log::log_info(&format!(
+                    "Executing in-place replace: backspaces={}, new_text='{}'",
+                    backspaces, new_text
+                ));
+
+                let supports_surrounding = (self.caps & IBUS_CAP_SURROUNDING_TEXT) != 0;
+                if supports_surrounding {
+                    let offset = -(backspaces as i32);
+                    let _ =
+                        Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
+                } else {
+                    for _ in 0..backspaces {
+                        let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
+                        let _ = Self::forward_key_event(
+                            &emitter,
+                            IBUS_KEY_BACKSPACE,
+                            22,
+                            IBUS_RELEASE_MASK,
+                        )
+                        .await;
+                    }
+                }
+
+                let text_val = make_ibus_text(&new_text);
+                let _ = Self::commit_text(&emitter, text_val).await;
+
+                self.undo_history = Some((
+                    new_text.chars().count(),
+                    format!("{}{}", self.buffer.raw, raw_char),
+                    new_text,
+                ));
+                true
+            }
+        }
     }
 
     async fn set_capabilities(&mut self, caps: u32) {
@@ -249,53 +265,44 @@ impl IBusEngineService {
         ));
     }
 
-    async fn focus_in(&mut self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+    async fn focus_in(&mut self) {
         super::log::log_info("focus_in");
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn focus_in_id(
-        &mut self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        object_path: &str,
-        client: &str,
-    ) {
+    async fn focus_in_id(&mut self, object_path: &str, client: &str) {
         super::log::log_info(&format!(
             "focus_in_id: object_path='{}', client='{}'",
             object_path, client
         ));
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn focus_out(&mut self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+    async fn focus_out(&mut self) {
         super::log::log_info("focus_out");
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn focus_out_id(
-        &mut self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        object_path: &str,
-    ) {
+    async fn focus_out_id(&mut self, object_path: &str) {
         super::log::log_info(&format!("focus_out_id: object_path='{}'", object_path));
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn reset(&mut self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+    async fn reset(&mut self) {
         super::log::log_info("reset");
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn enable(&mut self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+    async fn enable(&mut self) {
         super::log::log_info("enable");
         self.enabled = true;
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
-    async fn disable(&mut self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+    async fn disable(&mut self) {
         super::log::log_info("disable");
         self.enabled = false;
-        self.commit_current_buffer(&emitter).await;
+        self.buffer.reset();
     }
 
     async fn set_cursor_location(&mut self, x: i32, y: i32, w: i32, h: i32) {
