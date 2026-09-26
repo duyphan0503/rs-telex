@@ -416,6 +416,32 @@ mod tests {
     }
 
     #[test]
+    fn test_tone_placement_with_ending_consonants() {
+        // Words typed with tone before ending consonant
+        assert_eq!(type_string("toafn"), "toàn");
+        assert_eq!(type_string("toasn"), "toán");
+        assert_eq!(type_string("hoafn"), "hoàn");
+        assert_eq!(type_string("hoasc"), "hoác");
+        assert_eq!(type_string("hoajt"), "hoạt");
+        assert_eq!(type_string("xoefn"), "xoèn");
+        assert_eq!(type_string("khoern"), "khoẻn");
+        assert_eq!(type_string("khoest"), "khoét");
+        assert_eq!(type_string("thuyrt"), "thuỷt");
+        assert_eq!(type_string("thuyst"), "thuýt");
+        assert_eq!(type_string("thuyjt"), "thuỵt");
+        assert_eq!(type_string("quyst"), "quýt");
+
+        // Tone removal with 'z' key
+        assert_eq!(type_string("loioxz"), "lôi");
+        assert_eq!(type_string("toafnz"), "toan");
+        assert_eq!(type_string("vieetjz"), "viêt");
+
+        // Two words with space in between (e.g. "input đầu")
+        assert_eq!(type_string("input ddaauf"), "input đầu");
+        assert_eq!(type_string("rust ddaauf"), "rust đầu");
+    }
+
+    #[test]
     fn test_disabled_engine_mode() {
         let mut engine = crate::ibus::engine::IBusEngineService::new();
         engine.enabled = false;

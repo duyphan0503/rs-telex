@@ -193,6 +193,21 @@ impl TelexBuffer {
             return TelexAction::PassThrough(c);
         }
 
+        // Check if adding this character warrants tone re-balancing (e.g. "tòa" + 'n' -> "toàn", "hóa" + 'c' -> "hoác")
+        if self.current_tone != Tone::None && !self.composed.is_empty() {
+            let mut candidate = self.composed.clone();
+            candidate.push(c);
+            if let Some(rebalanced) = rebalance_tone_str(&candidate, self.current_tone) {
+                let old_len = self.composed.chars().count();
+                self.composed = rebalanced.clone();
+                self.raw.push(c);
+                return TelexAction::Replace {
+                    backspaces: old_len,
+                    new_text: rebalanced,
+                };
+            }
+        }
+
         self.raw.push(c);
         self.composed.push(c);
         TelexAction::PassThrough(c)
@@ -616,83 +631,118 @@ impl TelexBuffer {
     /// Finds vowel position using standard Vietnamese placement rule (Unikey default - "hòa", "được", "lỗi", "quà", "giá", "triều")
     fn find_tone_target_index(&self) -> Option<usize> {
         let chars: Vec<char> = self.composed.chars().collect();
-        let mut vowels: Vec<(usize, char)> = chars
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &c)| {
-                if is_vietnamese_vowel(c) {
-                    Some((i, c))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        find_tone_target_index_for_chars(&chars)
+    }
+}
 
-        if vowels.is_empty() {
-            return None;
+/// Finds vowel position for any character slice using standard Vietnamese placement rules
+pub fn find_tone_target_index_for_chars(chars: &[char]) -> Option<usize> {
+    let mut vowels: Vec<(usize, char)> = chars
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &c)| {
+            if is_vietnamese_vowel(c) {
+                Some((i, c))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if vowels.is_empty() {
+        return None;
+    }
+
+    // Special handling for initial "qu" and "gi" clusters:
+    // In "qu", 'u' acts as a semivowel consonant modifier (e.g. "quà", "quán", "quê", "quýt")
+    let lower_composed: String = chars.iter().map(|c| c.to_ascii_lowercase()).collect();
+    if lower_composed.starts_with("qu") && vowels.len() >= 2 && vowels[0].0 == 1 {
+        vowels.remove(0); // Ignore 'u' in "qu"
+    } else if lower_composed.starts_with("gi") && vowels.len() >= 2 && vowels[0].0 == 1 {
+        vowels.remove(0); // Ignore 'i' in "gi" when followed by another vowel
+    }
+
+    if vowels.len() == 1 {
+        return Some(vowels[0].0);
+    }
+
+    // Special case for "ươ": tone ALWAYS goes on 'ơ' (e.g. "được", "người", "rượu", "nước", "cười")
+    for i in 0..vowels.len().saturating_sub(1) {
+        let v1 = to_base_vowel(vowels[i].1).to_ascii_lowercase();
+        let v2 = to_base_vowel(vowels[i + 1].1).to_ascii_lowercase();
+        if v1 == 'u' && v2 == 'o' && has_horn(vowels[i].1) && has_horn(vowels[i + 1].1) {
+            return Some(vowels[i + 1].0);
         }
+    }
 
-        // Special handling for initial "qu" and "gi" clusters:
-        // In "qu", 'u' acts as a semivowel consonant modifier (e.g. "quà", "quán", "quê")
-        let lower_composed: String = chars.iter().map(|c| c.to_ascii_lowercase()).collect();
-        if lower_composed.starts_with("qu") && vowels.len() >= 2 && vowels[0].0 == 1 {
-            vowels.remove(0); // Ignore 'u' in "qu"
-        } else if lower_composed.starts_with("gi") && vowels.len() >= 2 && vowels[0].0 == 1 {
-            vowels.remove(0); // Ignore 'i' in "gi" when followed by another vowel
+    // Special case for "ưu": tone ALWAYS goes on 'ư' (e.g. "lưu", "hưu", "mưu", "cứu")
+    for i in 0..vowels.len().saturating_sub(1) {
+        let v1 = to_base_vowel(vowels[i].1).to_ascii_lowercase();
+        let v2 = to_base_vowel(vowels[i + 1].1).to_ascii_lowercase();
+        if v1 == 'u' && v2 == 'u' && has_horn(vowels[i].1) {
+            return Some(vowels[i].0);
         }
+    }
 
-        if vowels.len() == 1 {
+    // Priority rule for vowels with hats/horns/breves (ê, ô, ơ, â, ă, ư):
+    // In Vietnamese diphthongs like "iê", "uô", "yê", "uâ", tone ALWAYS goes to the vowel with mark!
+    // E.g., "triều", "tiến", "cuộn", "yến", "xuân"
+    for &(idx, ch) in vowels.iter().rev() {
+        if has_hat(ch) || has_horn(ch) || has_breve(ch) {
+            return Some(idx);
+        }
+    }
+
+    // Check if there is a trailing consonant after the last vowel
+    let last_vowel_idx = vowels.last()?.0;
+    let has_ending_consonant = last_vowel_idx < chars.len() - 1;
+
+    if vowels.len() == 2 {
+        if has_ending_consonant {
+            // When there is an ending consonant (e.g. "toàn", "hoán", "xoèn", "huýt", "thuýt"):
+            // Tone always goes to the second vowel!
+            return Some(vowels[1].0);
+        } else {
+            // No ending consonant:
+            // Standard Unikey placement puts tone on first vowel for "oa", "oe", "uy" ("hòa", "hòe", "thủy")
+            // and for all other plain diphthongs ("ua", "ia", "oi", "ai", "ay", "au", "ao", "eo", "iu", "ui")
             return Some(vowels[0].0);
         }
+    }
 
-        // Special case for "ươ": tone ALWAYS goes on 'ơ' (e.g. "được", "người", "rượu", "nước", "cười")
-        for i in 0..vowels.len().saturating_sub(1) {
-            let v1 = to_base_vowel(vowels[i].1).to_ascii_lowercase();
-            let v2 = to_base_vowel(vowels[i + 1].1).to_ascii_lowercase();
-            if v1 == 'u' && v2 == 'o' && has_horn(vowels[i].1) && has_horn(vowels[i + 1].1) {
-                return Some(vowels[i + 1].0);
-            }
+    if vowels.len() >= 3 {
+        if has_ending_consonant {
+            // In triphthongs with ending consonant (e.g. "uyên" in "nguyễn", "khuyên", "tuyệt", "chuyến"):
+            // Tone ALWAYS goes to the third vowel (e/ê)!
+            return Some(vowels[2].0);
+        } else {
+            // In triphthongs without ending consonant (e.g., "ngoài", "khoái", "khuỷu", "rượu", "chuối"):
+            // Tone goes to the middle vowel (second vowel)!
+            return Some(vowels[1].0);
         }
+    }
 
-        // Priority rule for vowels with hats/horns (ê, ô, ơ, â, ă, ư):
-        // In Vietnamese diphthongs like "iê", "uô", "yê", "uâ", tone ALWAYS goes to the vowel with mark!
-        // E.g., "triều", "tiến", "cuộn", "yến", "xuân"
-        for &(idx, ch) in vowels.iter().rev() {
-            if has_hat(ch) || has_horn(ch) || has_breve(ch) {
-                return Some(idx);
-            }
-        }
+    Some(vowels[0].0)
+}
 
-        // Check if there is a trailing consonant after the last vowel
-        let last_vowel_idx = vowels.last()?.0;
-        let has_ending_consonant = last_vowel_idx < chars.len() - 1;
+/// Rebalances the tone position of a composed word if necessary (e.g. "tòa" + 'n' -> "toàn", "hóa" + 'c' -> "hoác")
+pub fn rebalance_tone_str(composed: &str, current_tone: Tone) -> Option<String> {
+    if current_tone == Tone::None || composed.is_empty() {
+        return None;
+    }
+    let chars: Vec<char> = composed.chars().collect();
+    let unaccented: Vec<char> = chars.iter().map(|&c| remove_tone(c)).collect();
 
-        if vowels.len() == 2 {
-            if has_ending_consonant {
-                // When there is an ending consonant (e.g. "hoán", "luận"):
-                // Tone always goes to the second vowel!
-                return Some(vowels[1].0);
-            } else {
-                // No ending consonant:
-                // Standard Unikey placement puts tone on first vowel for "oa", "oe", "uy" ("hòa", "hòe", "thủy")
-                // and for all other plain diphthongs ("ua", "ia", "oi", "ai", "ay", "au", "ao", "eo", "iu", "ui")
-                return Some(vowels[0].0);
-            }
-        }
+    let target_idx = find_tone_target_index_for_chars(&unaccented)?;
 
-        if vowels.len() >= 3 {
-            if has_ending_consonant {
-                // In triphthongs with ending consonant (e.g. "uyên" in "nguyễn", "khuyên", "tuyệt", "chuyến"):
-                // Tone ALWAYS goes to the third vowel (e/ê)!
-                return Some(vowels[2].0);
-            } else {
-                // In triphthongs without ending consonant (e.g., "ngoài", "khuỷu", "rượu", "chuối"):
-                // Tone goes to the middle vowel (second vowel)!
-                return Some(vowels[1].0);
-            }
-        }
+    let mut new_chars = unaccented.clone();
+    new_chars[target_idx] = apply_tone(unaccented[target_idx], current_tone);
+    let new_composed: String = new_chars.into_iter().collect();
 
-        Some(vowels[0].0)
+    if new_composed != composed {
+        Some(new_composed)
+    } else {
+        None
     }
 }
 
