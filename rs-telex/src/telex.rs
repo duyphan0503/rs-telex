@@ -136,16 +136,31 @@ impl TelexBuffer {
         }
 
         // 4. Fallback: Regular letter typed
-        // Check if adding this character creates an invalid Vietnamese word or trailing cluster (e.g. "test", "export", "async", "software")
         let mut candidate_composed = self.composed.clone();
         candidate_composed.push(c);
 
         let mut candidate_raw = self.raw.clone();
         candidate_raw.push(c);
 
-        let is_code_word = is_programming_or_english(&candidate_composed)
-            || is_exact_code_keyword(&candidate_raw)
-            || has_invalid_trailing_cluster(&candidate_composed);
+        let is_vietnamese_trailing_repeat = !self.composed.is_empty()
+            && self
+                .composed
+                .chars()
+                .last()
+                .map(|ch| ch.to_ascii_lowercase())
+                == Some(c.to_ascii_lowercase())
+            && (self.current_tone != Tone::None
+                || self.composed.chars().any(|ch| {
+                    crate::unicode::has_hat(ch)
+                        || crate::unicode::has_horn(ch)
+                        || crate::unicode::has_breve(ch)
+                }));
+
+        let is_code_word = is_exact_code_keyword(&candidate_raw)
+            || is_exact_code_keyword(&candidate_composed)
+            || (!is_vietnamese_trailing_repeat
+                && (crate::syllable::is_programming_or_english(&candidate_composed)
+                    || crate::syllable::has_invalid_trailing_cluster(&candidate_composed)));
 
         if is_code_word {
             // Special case for typing rust: if raw is "russt" -> "rust"
@@ -173,7 +188,7 @@ impl TelexBuffer {
                 };
             }
 
-            // Auto-restore raw text if tone/modification was applied (e.g. "té" + "t" -> "test", "ẻ" + "p" -> "exp", "á" + "y" -> "asy")
+            // Auto-restore raw text only for recognized code keywords
             if self.current_tone != Tone::None || self.composed != self.raw {
                 let old_len = self.composed.chars().count();
                 let mut restored = self.raw.clone();
@@ -293,7 +308,91 @@ impl TelexBuffer {
                     }
                 }
 
-                // Case 3: 'u' -> 'ư'
+                // Case 3: "oa" -> "oă" (e.g., "hoac" + "w" -> "hoăc", "khoan" + "w" -> "khoăn", "ngoat" + "w" -> "ngoăt")
+                for i in 0..chars.len().saturating_sub(1) {
+                    let base_o = to_base_vowel(chars[i]).to_ascii_lowercase();
+                    let base_a = to_base_vowel(chars[i + 1]).to_ascii_lowercase();
+                    if base_o == 'o'
+                        && base_a == 'a'
+                        && !has_breve(chars[i + 1])
+                        && !has_hat(chars[i + 1])
+                    {
+                        let mut new_chars = chars.clone();
+                        let tone_a = get_tone(chars[i + 1]);
+                        let a_breve = if chars[i + 1].is_uppercase() {
+                            'Ă'
+                        } else {
+                            'ă'
+                        };
+                        new_chars[i + 1] = apply_tone(a_breve, tone_a);
+
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // Case 4: "ua" -> "ưa" (e.g., "chua" + "w" -> "chưa", "mua" + "w" -> "mưa")
+                for i in 0..chars.len().saturating_sub(1) {
+                    let base_u = to_base_vowel(chars[i]).to_ascii_lowercase();
+                    let base_a = to_base_vowel(chars[i + 1]).to_ascii_lowercase();
+                    if base_u == 'u' && base_a == 'a' && !has_horn(chars[i]) {
+                        let mut new_chars = chars.clone();
+                        let tone_u = get_tone(chars[i]);
+                        let u_horn = if chars[i].is_uppercase() { 'Ư' } else { 'ư' };
+                        new_chars[i] = apply_tone(u_horn, tone_u);
+
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // Case 5: Modifier Transition â -> ă (e.g. "mất" + "w" -> "mắt", "cân" + "w" -> "căn", "bấn" + "w" -> "bắn")
+                for i in (0..chars.len()).rev() {
+                    if has_hat(chars[i]) && to_base_vowel(chars[i]).eq_ignore_ascii_case(&'a') {
+                        let tone = get_tone(chars[i]);
+                        let is_upper = chars[i].is_uppercase();
+                        let a_breve = if is_upper { 'Ă' } else { 'ă' };
+                        let mut new_chars = chars.clone();
+                        new_chars[i] = apply_tone(a_breve, tone);
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // Case 6: Modifier Transition ô -> ơ (e.g. "bố" + "w" -> "bớ", "công" + "w" -> "cơng")
+                for i in (0..chars.len()).rev() {
+                    if has_hat(chars[i]) && to_base_vowel(chars[i]).eq_ignore_ascii_case(&'o') {
+                        let tone = get_tone(chars[i]);
+                        let is_upper = chars[i].is_uppercase();
+                        let o_horn = if is_upper { 'Ơ' } else { 'ơ' };
+                        let mut new_chars = chars.clone();
+                        new_chars[i] = apply_tone(o_horn, tone);
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // Case 7: Single 'u' -> 'ư'
                 for i in (0..chars.len()).rev() {
                     let base = to_base_vowel(chars[i]).to_ascii_lowercase();
                     if base == 'u'
@@ -312,27 +411,7 @@ impl TelexBuffer {
                     }
                 }
 
-                // Case 4: 'o' -> 'ơ'
-                for i in (0..chars.len()).rev() {
-                    let base = to_base_vowel(chars[i]).to_ascii_lowercase();
-                    if base == 'o'
-                        && !has_horn(chars[i])
-                        && !has_hat(chars[i])
-                        && let Some(horned) = to_horn(chars[i])
-                    {
-                        let mut new_chars = chars.clone();
-                        new_chars[i] = horned;
-                        let new_composed: String = new_chars.into_iter().collect();
-                        self.composed = new_composed.clone();
-                        self.raw.push(c);
-                        return Some(TelexAction::Replace {
-                            backspaces: old_len,
-                            new_text: new_composed,
-                        });
-                    }
-                }
-
-                // Case 5: 'a' -> 'ă'
+                // Case 8: Single 'a' -> 'ă'
                 for i in (0..chars.len()).rev() {
                     let base = to_base_vowel(chars[i]).to_ascii_lowercase();
                     if base == 'a'
@@ -352,7 +431,33 @@ impl TelexBuffer {
                     }
                 }
 
-                // Case 6: Undo 'w' modification (e.g. "tư" + "w" -> "tuw", "căn" + "w" -> "canw")
+                // Case 9: Single 'o' -> 'ơ' (only if not preceded or followed by 'a' as in 'oa')
+                for i in (0..chars.len()).rev() {
+                    let base = to_base_vowel(chars[i]).to_ascii_lowercase();
+                    let is_in_oa = (i > 0
+                        && to_base_vowel(chars[i - 1]).eq_ignore_ascii_case(&'o'))
+                        || (i + 1 < chars.len()
+                            && to_base_vowel(chars[i + 1]).eq_ignore_ascii_case(&'a'));
+
+                    if base == 'o'
+                        && !has_horn(chars[i])
+                        && !has_hat(chars[i])
+                        && !is_in_oa
+                        && let Some(horned) = to_horn(chars[i])
+                    {
+                        let mut new_chars = chars.clone();
+                        new_chars[i] = horned;
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // Case 10: Undo 'w' modification (e.g. "tư" + "w" -> "tuw", "căn" + "w" -> "canw")
                 let has_any_w_mod = chars.iter().any(|&ch| has_horn(ch) || has_breve(ch));
                 if has_any_w_mod {
                     let mut unmod = String::new();
@@ -372,7 +477,25 @@ impl TelexBuffer {
             }
 
             'a' => {
-                // Find 'a' without hat in current syllable -> 'â' (e.g., "van" + "a" -> "vân", "aa" -> "â")
+                // 1. Modifier Transition: 'ă' -> 'â' (e.g., "mắt" + "a" -> "mất", "căn" + "a" -> "cân", "bắn" + "a" -> "bấn")
+                for i in (0..chars.len()).rev() {
+                    if has_breve(chars[i]) {
+                        let tone = get_tone(chars[i]);
+                        let is_upper = chars[i].is_uppercase();
+                        let a_hat = if is_upper { 'Â' } else { 'â' };
+                        let mut new_chars = chars.clone();
+                        new_chars[i] = apply_tone(a_hat, tone);
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // 2. Find 'a' without hat in current syllable -> 'â' (e.g., "van" + "a" -> "vân", "aa" -> "â")
                 if let Some(idx) = find_vowel_target_in_current_syllable(&chars, 'a')
                     && !has_hat(chars[idx])
                     && !has_breve(chars[idx])
@@ -389,7 +512,7 @@ impl TelexBuffer {
                     });
                 }
 
-                // Undo 'a' modification if 'â' already exists (e.g., "vân" + "a" -> "vana")
+                // 3. Undo 'a' modification if 'â' already exists (e.g., "vân" + "a" -> "vana")
                 let has_a_hat = chars
                     .iter()
                     .any(|&ch| has_hat(ch) && to_base_vowel(ch).eq_ignore_ascii_case(&'a'));
@@ -455,7 +578,25 @@ impl TelexBuffer {
             }
 
             'o' => {
-                // Find 'o' without hat/horn in current syllable -> 'ô' (e.g., "khong" + "o" -> "không", "loi" + "o" -> "lôi")
+                // 1. Modifier Transition: 'ơ' -> 'ô' (e.g., "bớ" + "o" -> "bố", "cơng" + "o" -> "công")
+                for i in (0..chars.len()).rev() {
+                    if has_horn(chars[i]) && to_base_vowel(chars[i]).eq_ignore_ascii_case(&'o') {
+                        let tone = get_tone(chars[i]);
+                        let is_upper = chars[i].is_uppercase();
+                        let o_hat = if is_upper { 'Ô' } else { 'ô' };
+                        let mut new_chars = chars.clone();
+                        new_chars[i] = apply_tone(o_hat, tone);
+                        let new_composed: String = new_chars.into_iter().collect();
+                        self.composed = new_composed.clone();
+                        self.raw.push(c);
+                        return Some(TelexAction::Replace {
+                            backspaces: old_len,
+                            new_text: new_composed,
+                        });
+                    }
+                }
+
+                // 2. Find 'o' without hat/horn in current syllable -> 'ô' (e.g., "khong" + "o" -> "không", "loi" + "o" -> "lôi")
                 if let Some(idx) = find_vowel_target_in_current_syllable(&chars, 'o')
                     && !has_hat(chars[idx])
                     && !has_horn(chars[idx])
@@ -472,7 +613,7 @@ impl TelexBuffer {
                     });
                 }
 
-                // Undo 'o' modification if 'ô' already exists (e.g., "không" + "o" -> "khongo")
+                // 3. Undo 'o' modification if 'ô' already exists (e.g., "không" + "o" -> "khongo")
                 let has_o_hat = chars
                     .iter()
                     .any(|&ch| has_hat(ch) && to_base_vowel(ch).eq_ignore_ascii_case(&'o'));
@@ -553,6 +694,12 @@ impl TelexBuffer {
         // Do not apply tone if word is English/programming or ends with invalid trailing clusters
         if is_programming_or_english(&self.composed) || has_invalid_trailing_cluster(&self.composed)
         {
+            return None;
+        }
+
+        // Validate that the vowel cluster is legitimate in Vietnamese (reject meaningless words like "lio" + 'x' -> "lĩo")
+        let vowel_cluster = crate::syllable::extract_vowel_cluster(&self.composed);
+        if !crate::syllable::is_valid_vietnamese_vowel_cluster(&vowel_cluster) {
             return None;
         }
 

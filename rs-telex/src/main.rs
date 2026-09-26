@@ -442,6 +442,36 @@ mod tests {
     }
 
     #[test]
+    fn test_advanced_user_reported_issues() {
+        // 1. "tofan" vs "toafn" -> "toàn"
+        assert_eq!(type_string("tofan"), "toàn");
+        assert_eq!(type_string("toafn"), "toàn");
+
+        // 2. Typing "hoặc" with "hoacwj"
+        assert_eq!(type_string("hoacwj"), "hoặc");
+        assert_eq!(type_string("khoanw"), "khoăn");
+        assert_eq!(type_string("ngoatwj"), "ngoặt");
+        assert_eq!(type_string("ngoamwr"), "ngoẳm");
+        assert_eq!(type_string("ngoamwj"), "ngoặm");
+
+        // 3. Modifier transition: sửa "mắt" sang "mất" bằng cách gõ 'a', hoặc "cân" sang "căn" bằng 'w'
+        assert_eq!(type_string("matwsa"), "mất");
+        assert_eq!(type_string("cawna"), "cân");
+        assert_eq!(type_string("matsw"), "mắt");
+        assert_eq!(type_string("boosw"), "bớ");
+        assert_eq!(type_string("bowso"), "bố");
+
+        // 4. Repeated final consonant in already accented word: "viết" + 't' -> "viếtt" (no raw mangling)
+        assert_eq!(type_string("vieetst"), "viếtt");
+        assert_eq!(type_string("toafnn"), "toànn");
+
+        // 5. Reject meaningless vowel clusters like "lio", "mio", "bea" from taking tones
+        assert_eq!(type_string("liox"), "liox");
+        assert_eq!(type_string("miox"), "miox");
+        assert_eq!(type_string("beax"), "beax");
+    }
+
+    #[test]
     fn test_disabled_engine_mode() {
         let mut engine = crate::ibus::engine::IBusEngineService::new();
         engine.enabled = false;
