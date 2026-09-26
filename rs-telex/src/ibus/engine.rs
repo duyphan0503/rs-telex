@@ -181,21 +181,39 @@ impl IBusEngineService {
                 backspaces,
                 new_text,
             } => {
+                let supports_surrounding = (self.caps & IBUS_CAP_SURROUNDING_TEXT) != 0;
                 super::log::log_info(&format!(
-                    "Executing Replace: backspaces={}, new_text='{}'",
-                    backspaces, new_text
+                    "Executing Replace: backspaces={}, new_text='{}', supports_surrounding={}",
+                    backspaces, new_text, supports_surrounding
                 ));
 
-                // Always use standard synthetic Backspace forwarding for reliable atomic replacement across all Linux apps/browsers
-                for _ in 0..backspaces {
-                    let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 0, 0).await;
-                    let _ =
-                        Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 0, IBUS_RELEASE_MASK)
-                            .await;
+                if supports_surrounding {
+                    // Atomic replacement via Surrounding Text Delete + Commit for GTK/Electron/Modern Linux GUI
+                    let offset = -(backspaces as i32);
+                    let res_del =
+                        Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
+                    let text_val = make_ibus_text(&new_text);
+                    let res_com = Self::commit_text(&emitter, text_val).await;
+                    super::log::log_info(&format!(
+                        "Surrounding replace result: del={:?}, commit={:?}",
+                        res_del, res_com
+                    ));
+                } else {
+                    // Fallback to synthetic Backspace forwarding for Terminal / Legacy X11 apps
+                    for _ in 0..backspaces {
+                        let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 0, 0).await;
+                        let _ = Self::forward_key_event(
+                            &emitter,
+                            IBUS_KEY_BACKSPACE,
+                            0,
+                            IBUS_RELEASE_MASK,
+                        )
+                        .await;
+                    }
+                    let text_val = make_ibus_text(&new_text);
+                    let res_com = Self::commit_text(&emitter, text_val).await;
+                    super::log::log_info(&format!("Fallback replace result: commit={:?}", res_com));
                 }
-                let text_val = make_ibus_text(&new_text);
-                let res_com = Self::commit_text(&emitter, text_val).await;
-                super::log::log_info(&format!("Replace commit result: {:?}", res_com));
 
                 self.undo_history = Some((
                     new_text.chars().count(),
