@@ -51,14 +51,12 @@ impl IBusEngineService {
 impl IBusEngineService {
     /// Process incoming key events from the IBus daemon.
     ///
-    /// Direct in-place typing with zero preedit underlines:
-    /// - Untransformed keys are passed through natively.
-    /// - Transformations send hardware backspaces + commit replacement text.
+    /// Direct in-place typing with DeleteSurroundingText + CommitText.
     async fn process_key_event(
         &mut self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
         keyval: u32,
-        keycode: u32,
+        _keycode: u32,
         state: u32,
     ) -> bool {
         // 1. Release events: pass-through
@@ -72,12 +70,8 @@ impl IBusEngineService {
         }
 
         super::log::log_info(&format!(
-            "process_key_event: keyval={:#x} ('{}'), keycode={}, state={:#x}, enabled={}",
-            keyval,
-            char::from_u32(keyval).unwrap_or('?'),
-            keycode,
-            state,
-            self.enabled
+            "process_key_event: keyval={:#x}, state={:#x}, enabled={}",
+            keyval, state, self.enabled
         ));
 
         // 3. Modifiers detection
@@ -125,16 +119,9 @@ impl IBusEngineService {
                 && (keyval == 'z' as u32 || keyval == 'Z' as u32)
                 && let Some((backspaces, raw, _)) = self.undo_history.take()
             {
-                for _ in 0..backspaces {
-                    let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 14, 0).await;
-                    let _ = Self::forward_key_event(
-                        &emitter,
-                        IBUS_KEY_BACKSPACE,
-                        14,
-                        IBUS_RELEASE_MASK,
-                    )
-                    .await;
-                }
+                let offset = -(backspaces as i32);
+                let _ =
+                    Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
                 let text_val = make_ibus_text(&raw);
                 let _ = Self::commit_text(&emitter, text_val).await;
                 self.buffer.reset();
@@ -159,7 +146,9 @@ impl IBusEngineService {
             | IBUS_KEY_RIGHT
             | IBUS_KEY_UP
             | IBUS_KEY_DOWN
-            | IBUS_KEY_DELETE => {
+            | IBUS_KEY_DELETE
+            | 0xff50..=0xff6b // Home, End, PageUp, PageDown, Insert, etc.
+            | 0xffbe..=0xffcb => { // F1..F12
                 self.buffer.reset();
                 self.temporary_english = false;
                 return false;
@@ -167,8 +156,8 @@ impl IBusEngineService {
             _ => {}
         }
 
-        // 9. Extract valid character
-        let ch = if keyval < 0xff00 {
+        // 9. Extract printable ASCII or Unicode character
+        let ch = if (0x20..=0x7e).contains(&keyval) {
             char::from_u32(keyval)
         } else if (0x01000000..=0x0110ffff).contains(&keyval) {
             char::from_u32(keyval - 0x01000000)
@@ -184,7 +173,7 @@ impl IBusEngineService {
             }
         };
 
-        // 10. Non-alphanumeric characters (punctuation, symbols, numbers)
+        // 10. Non-alphanumeric characters (punctuation, symbols, spaces, numbers)
         if !ch.is_alphabetic() {
             self.buffer.reset();
             return false;
@@ -209,19 +198,9 @@ impl IBusEngineService {
                     backspaces, new_text
                 ));
 
-                // Send synthetic hardware backspaces with keycode 14
-                for _ in 0..backspaces {
-                    let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 14, 0).await;
-                    let _ = Self::forward_key_event(
-                        &emitter,
-                        IBUS_KEY_BACKSPACE,
-                        14,
-                        IBUS_RELEASE_MASK,
-                    )
-                    .await;
-                }
-
-                // Commit transformed replacement text
+                // Atomic replacement via DeleteSurroundingText + CommitText
+                let offset = -(backspaces as i32);
+                let _ = Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
                 let text_val = make_ibus_text(&new_text);
                 let _ = Self::commit_text(&emitter, text_val).await;
 
