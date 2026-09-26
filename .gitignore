@@ -21,8 +21,12 @@
 
 # Logs & Temporary files
 *.log
+*.tmp
+audit_plan.md
 
 # AI & Agent artifacts
+AGENTS.md
+CLAUDE.md
 .gitnexus/
 .codegraph/
 .omo/
