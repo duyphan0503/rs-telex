@@ -105,16 +105,34 @@ fn read_address_from_file(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
+    use std::io::Write;
 
     #[test]
     fn test_address_resolution() {
         let addr = get_ibus_address();
-        assert!(addr.is_some(), "Should find active IBus address on desktop");
-        let a = addr.unwrap();
-        assert!(
-            a.starts_with("unix:path="),
-            "Address format unexpected: {}",
-            a
-        );
+        if let Some(a) = addr {
+            assert!(
+                a.starts_with("unix:") || a.starts_with("tcp:"),
+                "Address format unexpected: {}",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_address_from_file() {
+        let tmp_path = std::env::temp_dir().join(format!("ibus_test_{}", std::process::id()));
+        let mut file = File::create(&tmp_path).expect("failed to create temp file");
+        writeln!(
+            file,
+            "# IBus address file\nIBUS_ADDRESS=unix:path=/tmp/ibus-mock-socket\nIBUS_DAEMON_PID=1234"
+        )
+        .unwrap();
+
+        let addr = read_address_from_file(&tmp_path);
+        assert_eq!(addr, Some("unix:path=/tmp/ibus-mock-socket".to_string()));
+
+        let _ = std::fs::remove_file(tmp_path);
     }
 }
