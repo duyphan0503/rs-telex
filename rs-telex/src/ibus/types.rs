@@ -76,6 +76,34 @@ pub fn make_ibus_text(text: &str) -> Value<'static> {
     Value::from(text_struct)
 }
 
+/// Builds an `IBusText` with underline attribute for PreeditText.
+pub fn make_ibus_preedit_text(text: &str) -> Value<'static> {
+    let empty_attachments: HashMap<String, Value<'static>> = HashMap::new();
+    let underline_attr = Structure::from((
+        "IBusAttribute".to_string(),
+        empty_attachments.clone(),
+        1u32, // IBUS_ATTR_TYPE_UNDERLINE
+        1u32, // IBUS_ATTR_VALUE_SINGLE
+        0u32, // start_index
+        text.chars().count() as u32, // end_index
+    ));
+
+    let attr_list = Structure::from((
+        "IBusAttrList".to_string(),
+        empty_attachments.clone(),
+        vec![Value::from(underline_attr)],
+    ));
+
+    let text_struct = Structure::from((
+        "IBusText".to_string(),
+        empty_attachments,
+        text.to_string(),
+        Value::from(attr_list),
+    ));
+
+    Value::from(text_struct)
+}
+
 /// Builds an `IBusEngineDesc` D-Bus value.
 ///
 /// Signature: `(sa{sv}ssssssssussssssss)`
