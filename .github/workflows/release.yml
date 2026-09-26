@@ -1,0 +1,57 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Packages and Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ibus libibus-1.0-dev libglib2.0-dev pkg-config dpkg-dev tar
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Build Debian Package (.deb)
+        run: make deb
+
+      - name: Create Tarball Archive (.tar.gz)
+        run: |
+          mkdir -p staging/rs-telex-x86_64-unknown-linux-gnu
+          cp target/release/rs-telex staging/rs-telex-x86_64-unknown-linux-gnu/
+          cp -r data staging/rs-telex-x86_64-unknown-linux-gnu/
+          cp Makefile LICENSE README.md staging/rs-telex-x86_64-unknown-linux-gnu/
+          cd staging && tar -czf ../target/rs-telex-x86_64-unknown-linux-gnu.tar.gz rs-telex-x86_64-unknown-linux-gnu && cd ..
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd target
+          sha256sum rs-telex_0.1.0_amd64.deb rs-telex-x86_64-unknown-linux-gnu.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/rs-telex_0.1.0_amd64.deb
+            target/rs-telex-x86_64-unknown-linux-gnu.tar.gz
+            target/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

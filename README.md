@@ -5,10 +5,12 @@
 **Bộ gõ Tiếng Việt Telex thuần Rust (Pure Rust) siêu nhẹ, hiệu năng cao cho Linux (IBus / GNOME / Wayland / X11)**
 
 [![Rust](https://img.shields.io/badge/language-Rust%202024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![CI](https://github.com/duyphan0503/rs-telex/actions/workflows/ci.yml/badge.svg)](https://github.com/duyphan0503/rs-telex/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/duyphan0503/rs-telex?style=flat-square&color=blue)](https://github.com/duyphan0503/rs-telex/releases)
 [![IBus](https://img.shields.io/badge/integration-IBus%20D--Bus-blue.svg?style=flat-square&logo=linux)](https://github.com/ibus/ibus)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20(Wayland%20%2F%20X11)-lightgrey.svg?style=flat-square&logo=linux)](https://kernel.org)
-[![Tests](https://img.shields.io/badge/tests-22%2F22%20passed-brightgreen.svg?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-22%2F22%20passed-brightgreen.svg?style=flat-square)](https://github.com/duyphan0503/rs-telex/actions)
 
 *Giao thức IBus D-Bus thuần Rust qua `zbus` — Không phụ thuộc C/GLib wrapper — Phản hồi tức thì < 1ms — Hỗ trợ Free Telex*
 
@@ -110,16 +112,25 @@ ibus engine rs-telex
 
 ---
 
-### Cách 3: Cài đặt qua gói Debian `.deb` (Ubuntu / Debian / Linux Mint)
+### Cách 3: Cài đặt qua gói Debian `.deb` (Ubuntu / Debian / Linux Mint / Pop!_OS)
 
+**Tải trực tiếp từ GitHub Releases (Không cần cài Rust):**
 ```bash
-# Đóng gói file .deb
-make deb
+# Tải bản release mới nhất
+wget https://github.com/duyphan0503/rs-telex/releases/latest/download/rs-telex_0.1.0_amd64.deb
 
-# Cài đặt gói vừa tạo
-sudo dpkg -i target/rs-telex_0.1.0_amd64.deb
+# Cài đặt gói .deb
+sudo dpkg -i rs-telex_0.1.0_amd64.deb
 
 # Khởi động lại IBus
+ibus restart
+ibus engine rs-telex
+```
+
+**Hoặc tự đóng gói từ mã nguồn:**
+```bash
+make deb
+sudo dpkg -i target/rs-telex_0.1.0_amd64.deb
 ibus restart
 ibus engine rs-telex
 ```
