@@ -78,7 +78,7 @@ pub fn get_ibus_address() -> Option<String> {
     }
 
     // Fallback: sort files by newest mtime
-    files.sort_by(|a, b| b.2.cmp(&a.2));
+    files.sort_by_key(|a| std::cmp::Reverse(a.2));
     for (path, _, _) in files {
         if let Some(addr) = read_address_from_file(&path) {
             return Some(addr);
