@@ -1,0 +1,13 @@
+[package]
+name = "rs-telex-sys"
+version = "0.1.0"
+edition = "2024"
+authors = ["duyphan0503 <https://github.com/duyphan0503>"]
+links = "ibus-1.0"
+
+[build-dependencies]
+bindgen = "0.71"
+pkg-config = "0.3"
+
+[features]
+bindgen = []

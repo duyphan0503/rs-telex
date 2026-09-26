@@ -1,0 +1,12 @@
+Package: rs-telex
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: duyphan0503 <https://github.com/duyphan0503>
+Homepage: https://github.com/duyphan0503/rs-telex
+Depends: ibus (>= 1.5)
+Description: High-performance Vietnamese Telex IME for Linux/IBus written in Rust
+ rs-telex provides smooth, flicker-free Vietnamese Telex typing with
+ intelligent syllable validation and automatic programming keyword pass-through.
+ Supports Ubuntu (GNOME + Wayland/X11).

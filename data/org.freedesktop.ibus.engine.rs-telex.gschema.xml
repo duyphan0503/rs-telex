@@ -1,0 +1,24 @@
+<schemalist>
+  <schema id="org.freedesktop.ibus.engine.rs-telex"
+          path="/org/freedesktop/ibus/engine/rs-telex/">
+    
+    <key name="tone-placement" type="s">
+      <default>'old-style'</default>
+      <summary>Quy tắc đặt dấu thanh</summary>
+      <description>old-style (hòa) hoặc new-style (hoà)</description>
+    </key>
+
+    <key name="default-commit-strategy" type="s">
+      <default>'auto'</default>
+      <summary>Chiến lược commit mặc định</summary>
+      <description>auto (surrounding text ưu tiên, fallback backspace), surrounding-text, forward-key-event</description>
+    </key>
+
+    <key name="app-overrides" type="as">
+      <default>[]</default>
+      <summary>Per-app commit strategy overrides</summary>
+      <description>Danh sách override dạng "app_id:strategy", VD: ["gnome-terminal:forward-key-event", "code:surrounding-text"]</description>
+    </key>
+
+  </schema>
+</schemalist>

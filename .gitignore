@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.rs.bk
+
+# Cargo
+# Note: Cargo.lock is kept in version control for binary applications
+
+# Packaging & Debian build artifacts
+*.deb
+*.tar.gz
+*.tar.xz
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs & Temporary files
+*.log
+
+# AI & Agent artifacts
+.gitnexus/
+.codegraph/
+.omo/
+.claude/

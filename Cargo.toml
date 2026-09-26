@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rs-telex-sys",
+    "rs-telex",
+]
+resolver = "2"
