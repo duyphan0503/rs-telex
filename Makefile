@@ -59,4 +59,11 @@ clean:
 	cargo clean
 	rm -rf target/deb-staging
 
-.PHONY: all build test install uninstall install-user uninstall-user deb clean
+reload: install-user
+	@pkill -9 -f ibus-engine-rs-telex || true
+	@ibus restart || true
+	@sleep 1
+	@ibus engine rs-telex || true
+	@echo "rs-telex reloaded and active."
+
+.PHONY: all build test install uninstall install-user uninstall-user deb clean reload
