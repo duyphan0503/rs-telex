@@ -121,22 +121,15 @@ impl IBusEngineService {
                 && (keyval == 'z' as u32 || keyval == 'Z' as u32)
                 && let Some((backspaces, raw, _)) = self.undo_history.take()
             {
-                let supports_surrounding = (self.caps & IBUS_CAP_SURROUNDING_TEXT) != 0;
-                if supports_surrounding {
-                    let offset = -(backspaces as i32);
-                    let _ =
-                        Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
-                } else {
-                    for _ in 0..backspaces {
-                        let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
-                        let _ = Self::forward_key_event(
-                            &emitter,
-                            IBUS_KEY_BACKSPACE,
-                            22,
-                            IBUS_RELEASE_MASK,
-                        )
-                        .await;
-                    }
+                for _ in 0..backspaces {
+                    let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
+                    let _ = Self::forward_key_event(
+                        &emitter,
+                        IBUS_KEY_BACKSPACE,
+                        22,
+                        IBUS_RELEASE_MASK,
+                    )
+                    .await;
                 }
                 let text_val = make_ibus_text(&raw);
                 let _ = Self::commit_text(&emitter, text_val).await;
@@ -217,22 +210,16 @@ impl IBusEngineService {
                     backspaces, new_text
                 ));
 
-                let supports_surrounding = (self.caps & IBUS_CAP_SURROUNDING_TEXT) != 0;
-                if supports_surrounding {
-                    let offset = -(backspaces as i32);
-                    let _ =
-                        Self::delete_surrounding_text(&emitter, offset, backspaces as u32).await;
-                } else {
-                    for _ in 0..backspaces {
-                        let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
-                        let _ = Self::forward_key_event(
-                            &emitter,
-                            IBUS_KEY_BACKSPACE,
-                            22,
-                            IBUS_RELEASE_MASK,
-                        )
-                        .await;
-                    }
+                // Send synthetic hardware backspaces to delete old characters across all applications (Electron, ChatGPT, Chrome, GTK, Qt, Terminal)
+                for _ in 0..backspaces {
+                    let _ = Self::forward_key_event(&emitter, IBUS_KEY_BACKSPACE, 22, 0).await;
+                    let _ = Self::forward_key_event(
+                        &emitter,
+                        IBUS_KEY_BACKSPACE,
+                        22,
+                        IBUS_RELEASE_MASK,
+                    )
+                    .await;
                 }
 
                 let text_val = make_ibus_text(&new_text);
