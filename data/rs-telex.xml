@@ -19,6 +19,7 @@
       <longname>Telex</longname>
       <description>Vietnamese Telex input method written in Rust</description>
       <rank>99</rank>
+      <symbol>vi</symbol>
     </engine>
   </engines>
 </component>

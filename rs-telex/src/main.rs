@@ -12,23 +12,24 @@ fn print_component_xml() {
 <component>
   <name>org.freedesktop.IBus.rs-telex</name>
   <description>Vietnamese Telex Input Method (Rust)</description>
-  <exec>/usr/bin/rs-telex --ibus</exec>
+  <exec>/usr/libexec/ibus-engine-rs-telex --ibus</exec>
   <version>0.1.0</version>
-  <author>dp</author>
+  <author>duyphan0503</author>
   <license>MIT</license>
-  <homepage>https://github.com/dp/rs-telex</homepage>
+  <homepage>https://github.com/duyphan0503/rs-telex</homepage>
   <textdomain>rs-telex</textdomain>
   <engines>
     <engine>
       <name>rs-telex</name>
       <language>vi</language>
       <license>MIT</license>
-      <author>dp</author>
+      <author>duyphan0503</author>
       <icon>ibus-rs-telex</icon>
       <layout>us</layout>
-      <longname>Vietnamese - Telex (rs-telex)</longname>
+      <longname>Telex</longname>
       <description>Vietnamese Telex input method written in Rust</description>
       <rank>99</rank>
+      <symbol>vi</symbol>
     </engine>
   </engines>
 </component>"#;
@@ -413,6 +414,62 @@ mod tests {
         buffer.process_char('e');
         buffer.process_char('f');
         assert_eq!(buffer.composed, "chề");
+    }
+
+    #[test]
+    fn test_tone_placement_with_ending_consonants() {
+        // Words typed with tone before ending consonant
+        assert_eq!(type_string("toafn"), "toàn");
+        assert_eq!(type_string("toasn"), "toán");
+        assert_eq!(type_string("hoafn"), "hoàn");
+        assert_eq!(type_string("hoasc"), "hoác");
+        assert_eq!(type_string("hoajt"), "hoạt");
+        assert_eq!(type_string("xoefn"), "xoèn");
+        assert_eq!(type_string("khoern"), "khoẻn");
+        assert_eq!(type_string("khoest"), "khoét");
+        assert_eq!(type_string("thuyrt"), "thuỷt");
+        assert_eq!(type_string("thuyst"), "thuýt");
+        assert_eq!(type_string("thuyjt"), "thuỵt");
+        assert_eq!(type_string("quyst"), "quýt");
+
+        // Tone removal with 'z' key
+        assert_eq!(type_string("loioxz"), "lôi");
+        assert_eq!(type_string("toafnz"), "toan");
+        assert_eq!(type_string("vieetjz"), "viêt");
+
+        // Two words with space in between (e.g. "input đầu")
+        assert_eq!(type_string("input ddaauf"), "input đầu");
+        assert_eq!(type_string("rust ddaauf"), "rust đầu");
+    }
+
+    #[test]
+    fn test_advanced_user_reported_issues() {
+        // 1. "tofan" vs "toafn" -> "toàn"
+        assert_eq!(type_string("tofan"), "toàn");
+        assert_eq!(type_string("toafn"), "toàn");
+
+        // 2. Typing "hoặc" with "hoacwj"
+        assert_eq!(type_string("hoacwj"), "hoặc");
+        assert_eq!(type_string("khoanw"), "khoăn");
+        assert_eq!(type_string("ngoatwj"), "ngoặt");
+        assert_eq!(type_string("ngoamwr"), "ngoẳm");
+        assert_eq!(type_string("ngoamwj"), "ngoặm");
+
+        // 3. Modifier transition: sửa "mắt" sang "mất" bằng cách gõ 'a', hoặc "cân" sang "căn" bằng 'w'
+        assert_eq!(type_string("matwsa"), "mất");
+        assert_eq!(type_string("cawna"), "cân");
+        assert_eq!(type_string("matsw"), "mắt");
+        assert_eq!(type_string("boosw"), "bớ");
+        assert_eq!(type_string("bowso"), "bố");
+
+        // 4. Repeated final consonant in already accented word: "viết" + 't' -> "viếtt" (no raw mangling)
+        assert_eq!(type_string("vieetst"), "viếtt");
+        assert_eq!(type_string("toafnn"), "toànn");
+
+        // 5. Reject meaningless vowel clusters like "lio", "mio", "bea" from taking tones
+        assert_eq!(type_string("liox"), "liox");
+        assert_eq!(type_string("miox"), "miox");
+        assert_eq!(type_string("beax"), "beax");
     }
 
     #[test]
